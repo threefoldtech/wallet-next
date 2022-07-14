@@ -80,7 +80,7 @@
                                 class="my-8 inline-block w-full max-w-md transform overflow-hidden rounded-md bg-white p-6 text-left align-middle shadow-xl transition-all"
                             >
                                 <div class="flex w-full flex-col items-center justify-center">
-                                    <div class="pb-4 text-center">{{ loadingSubtitle }} ...</div>
+                                    <div class="pb-4 text-center">{{ $t('transfer.bridge.bridging') }}</div>
                                     <div>
                                         <svg
                                             class="h-6 animate-spin text-center text-primary-600"
@@ -121,21 +121,14 @@
     import { useRoute, useRouter } from 'vue-router';
     import { Wallet, wallets } from '@/modules/Wallet/services/walletService';
     import { ref } from 'vue';
-    import {
-        activationServiceForSubstrate,
-        getSubstrateApi,
-        submitExtrensic,
-    } from '@/modules/TFChain/services/tfchainService';
-    import { userInitialized } from '@/modules/Core/services/cryptoService';
-    import { createEntitySign, getEntity, getEntityIDByAccountId } from '@/modules/TFChain/services/entityService';
     import { addNotification, NotificationType } from '@/modules/Core/services/notificationService';
     import { toNumber } from 'lodash';
     import { onBeforeMount } from '@vue/runtime-core';
     import AssetIcon from '@/modules/Currency/components/AssetIcon.vue';
     import { translate } from '@/modules/Core/utils/translate';
-    import en from '@/translates/en';
-    import { nanoid } from 'nanoid';
-    import { bridgeToSubstrate } from '@/modules/Bridge/services/bridgeService';
+    import { bridgeToSubstrate } from '@/modules/TFChain/services/transfer.service';
+    import { KeyringPair } from '@polkadot/keyring/types';
+    import { Keypair } from 'stellar-sdk';
 
     const router = useRouter();
     const route = useRoute();
@@ -153,90 +146,22 @@
 
     const bridgeTokens = async () => {
         isLoadingTransaction.value = true;
+        if (!selectedWallet.value) return;
+
+        const substrateKeyRing: KeyringPair = selectedWallet.value.keyPair.getSubstrateKeyring();
+        const stellarKeyPair: Keypair = selectedWallet.value.keyPair.getStellarKeyPair();
 
         try {
-            await submitBridge();
+            await bridgeToSubstrate(substrateKeyRing, stellarKeyPair, amount);
+
+            addNotification(NotificationType.success, translate('transfer.confirmBridge.success'), '', 5000);
+            console.info('Transaction done');
+            isLoadingTransaction.value = false;
         } catch (e) {
             isLoadingTransaction.value = false;
             addNotification(NotificationType.error, translate('transfer.confirmBridge.errorSendTokens'), '', 5000);
-            console.error('Transaction failed');
             console.error(e);
-
-            await router.back();
         }
-    };
-
-    const submitBridge = async () => {
-        if (!selectedWallet.value) return;
-
-        const substrateAddressTo = selectedWallet.value.keyPair.getSubstrateKeyring().address;
-        const api = await getSubstrateApi();
-
-        loadingSubtitle.value = translate('transfer.confirmBridge.usingActivationService');
-        console.info('Using activation services for substrate');
-        await activationServiceForSubstrate(substrateAddressTo);
-
-        const substrateKeyRing = selectedWallet.value.keyPair.getSubstrateKeyring();
-        const name = `${userInitialized.value}${nanoid()}`;
-
-        if (!name) return;
-
-        loadingSubtitle.value = translate('transfer.confirmBridge.gettingEntityId');
-        console.info('Getting entityId for user ', name);
-        let entityId = await getEntityIDByAccountId(api, substrateKeyRing.address);
-
-        if (entityId == 0) {
-            loadingSubtitle.value = translate('transfer.confirmBridge.entityIdNotFound');
-            console.info("Can't find entity, creating one");
-
-            const country = 'Unknown';
-            const city = 'Unknown';
-
-            const signature = createEntitySign(substrateKeyRing, name, country, city);
-
-            const submittableExtrinsic = api.tx.tfgridModule.createEntity(
-                substrateAddressTo,
-                name,
-                country,
-                city,
-                signature
-            );
-            const nonce = await api.rpc.system.accountNextIndex(substrateAddressTo);
-
-            await submitExtrensic(submittableExtrinsic, substrateKeyRing, { nonce });
-
-            let i = 0;
-            while (entityId === 0) {
-                if (i > 10) {
-                    console.error('Entity not found after 10 tries');
-                    addNotification(
-                        NotificationType.error,
-                        translate('transfer.confirmBridge.errorCreateEntity'),
-                        '',
-                        5000
-                    );
-                    throw new Error('Entity not found after 10 tries');
-                }
-                console.info('Entity not found, retrying...');
-                entityId = await getEntityIDByAccountId(api, substrateKeyRing.address);
-                await new Promise(resolve => setTimeout(resolve, 1000));
-                i++;
-            }
-        }
-
-        const entityIdToMakeTheBridge = await getEntityIDByAccountId(api, substrateKeyRing.address);
-
-        if (entityIdToMakeTheBridge == 0) {
-            addNotification(NotificationType.error, translate('transfer.confirmBridge.entityIdNotFound'), '', 5000);
-            return;
-        }
-
-        await bridgeToSubstrate(amount, selectedWallet.value.keyPair.getStellarKeyPair(), entityIdToMakeTheBridge);
-        loadingSubtitle.value = translate('transfer.confirmBridge.finishingUp');
-        isLoadingTransaction.value = false;
-
-        addNotification(NotificationType.success, translate('transfer.confirmBridge.success'), '', 5000);
-        console.log('Transaction done');
 
         await router.back();
     };

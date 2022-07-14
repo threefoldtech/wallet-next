@@ -11,6 +11,8 @@ import { SubmittableExtrinsic } from '@polkadot/api/types';
 import type { ISubmittableResult } from '@polkadot/types/types';
 import { SubstrateFarmDto } from '@/modules/Core/types/substrate.types';
 import throttle from 'lodash/throttle';
+import { KeyringPair } from '@polkadot/keyring/types';
+import { isSubstrateBalanceAvailable } from '@/modules/Currency/services/currencyService';
 
 const apiCache = ref<Promise<ApiPromise>>();
 
@@ -68,14 +70,6 @@ export const hex2a = (hex: string) => {
         if (v) str += String.fromCharCode(v);
     }
     return str;
-};
-export const getTwinId = async (id: string) => {
-    const api = await getSubstrateApi();
-
-    const entity = await api.query.tfgridModule.twinIdByAccountID(id);
-
-    const res = <any>entity.toJSON();
-    return <number>res;
 };
 
 export const getUsersTermsAndConditions = async (
